@@ -505,6 +505,30 @@ _bands_flush() {
 	rm -f /tmp/5gmodem/bands_* 2>/dev/null
 }
 _bands_set_bg() {
+	# RM520N-GL can lose its QMI data session on a live AT mode change.
+	if [ "$1:$2:$_AVIDPID:$_APROD" = "mode:setmode:2c7c0801:RM520N-GL" ] && [ "$_AMP" = "$_bs_am" ]; then
+		local iface modes
+		iface=$(uci -q get "5gmodem.$_bs_sec.network")
+		if [ -n "$iface" ] && [ "$(uci -q get "network.$iface.proto")" = qmi ] &&
+		   [ "$(uci -q get "network.$iface.modem_path")" = "$_bs_am" ] &&
+		   uqmi --help 2>&1 | grep -q 'Available modes:.*5gnr'; then
+			case "$3" in
+				0) modes=all ;;
+				1) modes=umts ;;
+				2) modes=lte ;;
+				3) modes=lte,5gnr ;;
+				4) modes=5gnr ;;
+				*) echo "Unsupported network mode"; exit 1 ;;
+			esac
+			[ -z "$(uci changes network)" ] || { echo "Apply pending network changes first"; exit 1; }
+			uci -q set "network.$iface.modes=$modes" && uci -q commit network ||
+				{ echo "Failed to save network mode"; exit 1; }
+			BANDS_ACTIVE_MODEM="$_bs_am" _persist_mode "$3"
+			_bands_flush
+			at_unlock
+			exec ubus call network reload
+		fi
+	fi
 	(
 		_sbg_how="$1"; shift
 		case "$_sbg_how" in
