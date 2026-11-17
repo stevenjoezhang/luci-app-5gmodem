@@ -2,9 +2,10 @@
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
-from test_runtime_audit import function, shell
+from test_runtime_audit import SHARE, function, shell
 
 
 class ForkAdaptations(unittest.TestCase):
@@ -69,7 +70,8 @@ at_unlock() { :; }
         return self.run_mock(function('_bands_qmi_mode','bands.sh') +
             f'\n_bands_qmi_mode {action} {mode}; rc=$?; cat "$STATE.trace" 2>/dev/null; exit "$rc"', {
                 '5gmodem.m_1_1.network':'modem', 'network.modem.proto':proto,
-                'network.modem.modem_path':path}, setup + extra)
+                'network.modem.modem_path':path},
+            function('getqmimode', 'modemband/_quectel_common2') + '\n' + setup + extra)
 
     def test_all_mode_mappings(self):
         for mode, value in enumerate(('all', 'umts', 'lte', 'lte,5gnr', '5gnr')):
@@ -80,12 +82,28 @@ at_unlock() { :; }
             self.assertLess(result.stdout.index('persist:'),result.stdout.index('ubus:'))
 
     def test_other_targets_and_live_commands_use_existing_path(self):
-        for kwargs in ({'proto':'mbim'}, {'path':'2-1'}, {'extra':'_APROD=RM521F-GL'},
+        for kwargs in ({'proto':'mbim'}, {'path':'2-1'}, {'extra':'unset -f getqmimode'},
                        {'extra':'uqmi() { echo "Available modes: all lte"; }'},
                        {'action':'after setmode'}, {'extra':'_AMP=2-1'}):
             result, got = self.qmi(**kwargs)
             self.assertEqual(result.returncode,2,result.stderr)
             self.assertNotIn('network.modem.modes',got)
+
+    def test_profile_controls_mapping_without_a_model_whitelist(self):
+        result, got = self.qmi(mode='2', extra='_AVIDPID=12345678; _APROD=another_modem')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(got['network.modem.modes'], 'lte')
+        result, got = self.qmi(mode='2', extra='getqmimode() { echo 5gnr; }')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(got['network.modem.modes'], '5gnr')
+
+    def test_setmode_propagates_failure(self):
+        source = (SHARE / 'bands.sh').read_text()
+        branch = re.search(r'^\t"setmode"\)\n.*?^\t\t;;', source, re.M | re.S)
+        self.assertIsNotNone(branch)
+        result = shell('set -- setmode 2\n_bands_set_bg() { return 1; }\n' +
+                       'case "$1" in\n' + branch.group() + '\nesac\nexit 0\n')
+        self.assertEqual(result.returncode, 1)
 
     def test_pending_changes_and_invalid_modes_are_rejected(self):
         for kwargs in ({'extra':'export PENDING=network.lan.mtu=1400'}, {'mode':'9'}):

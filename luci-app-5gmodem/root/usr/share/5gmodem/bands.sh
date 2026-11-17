@@ -627,21 +627,14 @@ _bands_flush() {
 	rm -f /tmp/5gmodem/bands_* 2>/dev/null
 }
 _bands_qmi_mode() {
-	[ "$1:$2:$_AVIDPID:$_APROD" = "mode:setmode:2c7c0801:RM520N-GL" ] || return 2
+	[ "$1:$2" = "mode:setmode" ] && command -v getqmimode >/dev/null 2>&1 || return 2
 	[ -n "$_bs_am" ] && [ "$_AMP" = "$_bs_am" ] || return 2
 	_qm_if=$(uci -q get "5gmodem.$_bs_sec.network")
 	case "$_qm_if" in ''|*[!A-Za-z0-9_]*) return 2 ;; esac
 	[ "$(uci -q get "network.$_qm_if.proto")" = qmi ] || return 2
 	[ "$(uci -q get "network.$_qm_if.modem_path")" = "$_bs_am" ] || return 2
 	uqmi --help 2>&1 | grep -q 'Available modes:.*5gnr' || return 2
-	case "$3" in
-		0) _qm_modes=all ;;
-		1) _qm_modes=umts ;;
-		2) _qm_modes=lte ;;
-		3) _qm_modes=lte,5gnr ;;
-		4) _qm_modes=5gnr ;;
-		*) echo "Unsupported mode"; return 1 ;;
-	esac
+	_qm_modes=$(getqmimode "$3") || { echo "Unsupported mode"; return 1; }
 	_qm_pending=$(uci changes network) || return 1
 	[ -z "$_qm_pending" ] || { echo "Apply pending network changes first"; return 1; }
 	_qm_old=$(uci -q get "network.$_qm_if.modes")
@@ -2019,7 +2012,9 @@ case $1 in
 		getmode
 		;;
 	"setmode")
-		[ -n "$2" ] && _bands_set_bg mode setmode "$2"
+		if [ -n "$2" ]; then
+			_bands_set_bg mode setmode "$2" || exit $?
+		fi
 		;;
 	"setmodelive")
 		[ -n "$2" ] || { echo "no mode"; exit 2; }

@@ -139,6 +139,17 @@ getsupportedmodes() {
 	echo "0:Auto 1:3G 2:4G 3:4G+5G 4:5G"
 }
 
+getqmimode() {
+	case "$1" in
+		0) echo all ;;
+		1) echo umts ;;
+		2) echo lte ;;
+		3) echo lte,5gnr ;;
+		4) echo 5gnr ;;
+		*) return 1 ;;
+	esac
+}
+
 _qmode_word() {
 	case "$1" in
 		0) echo "AUTO" ;;
